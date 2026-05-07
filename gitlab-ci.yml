@@ -1,4 +1,5 @@
 auto_tag:
+  image: 467878288214.dkr.ecr.ap-northeast-2.amazonaws.com/azure-cli:terraform-v1.14.6
   tags:
     - docker
   rules:
