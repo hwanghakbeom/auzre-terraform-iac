@@ -1,5 +1,7 @@
 auto_tag:
   image: alpine:latest
+  tags:
+    - docker
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
   before_script:
