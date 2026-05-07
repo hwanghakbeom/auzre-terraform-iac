@@ -6,88 +6,44 @@ auto_tag:
     - if: '$CI_COMMIT_BRANCH == "main"'
   script:
     - |
-      LATEST=$(curl -sf --header "PRIVATE-TOKEN: $GITLAB_API_TOKEN" \
-        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/tags?order_by=version&sort=desc" \
-        | grep -oE '"name":"v[0-9]+\.[0-9]+\.[0-9]+"' \
-        | head -n1 \
-        | sed 's/"name":"//; s/"$//')
+      set +e
+      echo "=== fetch existing tags ==="
+      RESPONSE=$(curl -s -w "\nHTTPCODE:%{http_code}" \
+        -H "PRIVATE-TOKEN: $GITLAB_API_TOKEN" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/tags?order_by=version&sort=desc")
+      echo "$RESPONSE"
+      HTTP=$(echo "$RESPONSE" | grep -oE 'HTTPCODE:[0-9]+' | cut -d: -f2)
+      [ "$HTTP" = "200" ] || { echo "list failed: HTTP $HTTP"; exit 1; }
+
+      LATEST=$(echo "$RESPONSE" | grep -oE '"name":"v[0-9]+\.[0-9]+\.[0-9]+"' | head -n1 | sed 's/"name":"//;s/"$//')
       LATEST=${LATEST:-v0.0.0}
       echo "Previous: $LATEST"
 
+      echo "=== calculate next ==="
       VER=${LATEST#v}
-      MAJOR=${VER%%.*}
-      MINOR=$(echo $VER | cut -d. -f2)
-      PATCH=${VER##*.}
-
+      MAJOR=$(echo "$VER" | cut -d. -f1)
+      MINOR=$(echo "$VER" | cut -d. -f2)
+      PATCH=$(echo "$VER" | cut -d. -f3)
       PATCH=$((PATCH+1))
-      if [ $PATCH -gt 9 ]; then
+      if [ "$PATCH" -gt 9 ]; then
         PATCH=0
         MINOR=$((MINOR+1))
-        if [ $MINOR -gt 9 ]; then
+        if [ "$MINOR" -gt 9 ]; then
           MINOR=0
           MAJOR=$((MAJOR+1))
         fi
       fi
-
-      NEW="v${MAJOR}.${MINOR}.${PATCH}"
+      NEW="v$MAJOR.$MINOR.$PATCH"
       echo "New: $NEW"
 
-      curl -sf --request POST \
-        --header "PRIVATE-TOKEN: $GITLAB_API_TOKEN" \
-        --data "tag_name=${NEW}&ref=${CI_COMMIT_SHA}&message=Release ${NEW}" \
-        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/tags"
-➜  ~ cat /Users/mzs02-andy/Projects/mz_external/kis_azure/gitlab-ci.yml
-auto_tag:
-  image: 467878288214.dkr.ecr.ap-northeast-2.amazonaws.com/azure-cli:terraform-v1.14.6
-  tags:
-    - docker
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-  script:
-    - echo "=== Step 1 fetch existing tags ==="
-    - |
-      RESPONSE=$(curl -s --write-out "\n__HTTP__:%{http_code}" \
-        --header "PRIVATE-TOKEN: $GITLAB_API_TOKEN" \
-        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/tags?order_by=version&sort=desc" || true)
-      echo "Response: $RESPONSE"
-      HTTP=$(echo "$RESPONSE" | grep -oE '__HTTP__:[0-9]+' | cut -d: -f2)
-      BODY=$(echo "$RESPONSE" | sed 's/__HTTP__:[0-9]*$//')
-      echo "HTTP code: $HTTP"
-      if [ "$HTTP" != "200" ]; then
-        echo "Failed to list tags"
-        exit 1
-      fi
-      LATEST=$(echo "$BODY" | grep -oE '"name":"v[0-9]+\.[0-9]+\.[0-9]+"' | head -n1 | sed 's/"name":"//; s/"$//' || true)
-      LATEST=${LATEST:-v0.0.0}
-      echo "Previous: $LATEST"
-    - echo "=== Step 2 calculate next version ==="
-    - |
-      VER=${LATEST#v}
-      MAJOR=${VER%%.*}
-      MINOR=$(echo $VER | cut -d. -f2)
-      PATCH=${VER##*.}
-      PATCH=$((PATCH+1))
-      if [ $PATCH -gt 9 ]; then
-        PATCH=0
-        MINOR=$((MINOR+1))
-        if [ $MINOR -gt 9 ]; then
-          MINOR=0
-          MAJOR=$((MAJOR+1))
-        fi
-      fi
-      NEW="v${MAJOR}.${MINOR}.${PATCH}"
-      echo "New: $NEW"
-    - echo "=== Step 3 create tag ==="
-    - |
-      RESULT=$(curl -s --write-out "\n__HTTP__:%{http_code}" --request POST \
-        --header "PRIVATE-TOKEN: $GITLAB_API_TOKEN" \
-        --data "tag_name=${NEW}&ref=${CI_COMMIT_SHA}&message=Release ${NEW}" \
-        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/tags" || true)
-      echo "Response: $RESULT"
-      HTTP=$(echo "$RESULT" | grep -oE '__HTTP__:[0-9]+' | cut -d: -f2)
-      echo "HTTP code: $HTTP"
-      if [ "$HTTP" != "201" ]; then
-        echo "Failed to create tag"
-        exit 1
-      fi
-      echo "Tag $NEW created successfully"
+      echo "=== create tag ==="
+      RESULT=$(curl -s -w "\nHTTPCODE:%{http_code}" -X POST \
+        -H "PRIVATE-TOKEN: $GITLAB_API_TOKEN" \
+        --data-urlencode "tag_name=$NEW" \
+        --data-urlencode "ref=$CI_COMMIT_SHA" \
+        --data-urlencode "message=Release $NEW" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/tags")
+      echo "$RESULT"
+      HTTP=$(echo "$RESULT" | grep -oE 'HTTPCODE:[0-9]+' | cut -d: -f2)
+      [ "$HTTP" = "201" ] || { echo "create failed: HTTP $HTTP"; exit 1; }
+      echo "Tag $NEW created"
